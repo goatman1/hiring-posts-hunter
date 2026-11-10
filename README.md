@@ -1,4 +1,4 @@
-# Codex Job Hunter
+# Hiring Posts Hunter
 
 Find relevant hiring-manager posts, verify who is actually hiring, match opportunities to your resumes, and keep a local application tracker. The default scope is **full-time internship, junior, new-grad, and PhD-entry tech and quant roles**.
 
@@ -41,7 +41,7 @@ The implementation separates that research from durable record keeping:
 | Validate records, deduplicate, save history and export Excel | Local Python helpers and SQLite | Makes repeated runs, retries and tracking edits predictable. |
 | Review drafts and perform outreach or application submission | You | Separates a prepared draft from an action actually taken. |
 
-No custom MCP server, extra installation, or agent framework is required. The skill runs when invoked in Codex; it is not a background crawler or scheduler.  
+No custom MCP server, extra installation, or agent framework is required. The skill runs when invoked in Codex; it is not a background crawler or scheduler. If Claude, ask your agent to do some small adaptations.   
 
 ## Agent architecture and harness
 
