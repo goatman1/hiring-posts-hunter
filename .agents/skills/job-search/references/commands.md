@@ -20,6 +20,12 @@ Write JSON inputs to files; never interpolate collected text into shell commands
 | update-lead | `{"lead_id":"...","edits":{"status":"applied","notes":"..."}}` |
 | record-application | `{"lead_id":"...","event_id":"stable-id","details":{"type":"application","url":"..."},"edits":{"status":"applied","application_date":"2027-01-06"}}` |
 | sync-workbook | `{}` |
+| search-plan | `{"config":{"search_strategy":"hybrid","search_phase":"discovery","sort_by":"relevance","date_posted":"past_month","target_companies":["Example"]}}` |
+| save-author | `{"author_url":"https://example.com/in/person","employer":"Example","checked_at":"2026-11-10T12:00:00+00:00","checks":{"author_us":{"result":"unknown"},"manager":{"result":"unknown"},"affiliation":{"result":"unknown"}}}` |
+| get-author | `{"author_url":"https://example.com/in/person","expected_employer":"Example","max_age_days":30,"contradiction":false}` |
+| start-comparison | `{"comparison_id":"pilot-1","arms":{"broad":"hiring scientist ml","intent":"my team hiring machine learning"},"track":"tech","sort_by":"relevance","date_posted":"past_month","budget":{"posts":10,"profiles":3,"jobs":2}}` |
+| save-comparison-arm | See bounded audit schema below. |
+| comparison-report | `{"comparison_id":"pilot-1"}` |
 
 Ingestion returns post IDs; batch output provides content_digest and resume IDs. Copy them exactly. Optional ingestion fields: `batch_id` (unique within run, identical retries are idempotent) and `loading_actions` (nonnegative integer, default 1). A repeated batch ID with changed input is rejected. Recovered pending posts are available for analysis but do not count as new. Lexically similar posts are flagged, never automatically merged. Fallback captures can acquire a permalink while retaining stable internal IDs.
 
@@ -28,3 +34,34 @@ Editable tracking fields: status, notes, next_action, follow_up_date, applicatio
 `analysis-batch` offsets refer to the current pending list. Obtain all disjoint worker batches before accepting any submissions, or fetch offset zero after a batch completes. Do not increment offsets across a shrinking list. Checkpoint elapsed_seconds is an increment, not a total; do not replay it after a successful response.
 
 Save bulk inputs in ignored .local. Analysis batches include resume variants: coordinator selects relevant excerpts before delegation. Avoid loading the entire database into context.
+
+## Discovery records
+
+`start-run` returns the resolved `search_plan`. Standalone `search-plan` uses only its input and built-in defaults; pass the run's effective config to preserve private settings. `search_phase=discovery` suggests relevance/month only when sort/date are omitted; explicit values always win. An empty employer list marks that lane `requires_scope`; Codex selects a justified scope or skips it explicitly. Global run limits span all lanes.
+
+Author cache checks are exactly author_us, manager and affiliation. Each resolved check needs `{"result":"pass|fail","source_url":"https://...","quote":"exact source excerpt","reason":"why it supports this fact"}`; unknown needs only result. These comparison/cache facts are separate from the assessment Check schema, which uses post-bound evidence IDs. Quotes need semantic review by Codex. A cache record retains history and reports revalidation on age, employer change or contradiction; it never proves own-team hiring for a new post. Pass `author_max_age_days` from the plan as get-author's `max_age_days`.
+
+Comparison protocol and arm submissions are immutable and idempotent. Changed inputs require a new comparison ID. Resume an interrupted comparison by reading comparison-report, which labels missing arms incomplete. Arm order is protocol object order.
+
+```json
+{
+  "comparison_id": "pilot-1",
+  "arm": "broad",
+  "observed_filters": "Posts; Top Match; Past month",
+  "stop_reason": "sample_cap",
+  "profiles_used": ["https://example.com/in/person"],
+  "jobs_used": [],
+  "observations": [{
+    "post_key": "canonical-post-id-or-author-content-fingerprint",
+    "rank": 1,
+    "author_url": "https://example.com/in/person",
+    "source_url": "https://example.com/post/1",
+    "excerpt": "Exact screening evidence",
+    "promising": true,
+    "reason": "Relevant hiring; profile authority unresolved",
+    "checks": {"manager": {"result": "unknown"}}
+  }]
+}
+```
+
+Submit each complete arm atomically, preserving all first-N observations and consecutive ranks. Retain partial input files privately while collecting. Allowed checks: active_hiring, relevant_role, author_us, manager, affiliation, own_team, full_time, entry_level, job_us. Omitted checks count as unknown. Profile/JD evidence includes reused cache evidence and failed attempts in usage arrays; each entry charges one check. Do not transfer unused budget between arms. Use a shared post_key across arms for overlap reporting. For rejects without permalinks, preserve the search URL, author and exact excerpt; do not misrepresent the excerpt as complete source content. Fully eligible posts require all checks; resume scoring remains the separate assessment workflow.

@@ -4,6 +4,10 @@ Tested with the existing Codex Python 3.12.14 runtime and Pydantic, openpyxl, py
 
 ## Automated checks
 
+The strategy update passes 35 tests total: the 27 baseline tests below plus 8 tests for search mode/scope resolution, author evidence freshness/history, employer-change revalidation, fixed comparison protocols, interrupted comparisons, action caps, cached-evidence charging, replay conflicts, per-arm overlap and distinct-author counting. Unknown author location, management, affiliation or team ownership cannot count as a verified manager. [The equal-cap live comparison](SEARCH_COMPARISON.md) records the three-arm tech pilot and its limitations.
+
+The search-plan CLI and live comparison persistence/replay were exercised. The eligible source was added to the existing tracker and the workbook synchronized successfully without duplicate ingestion. The skill-creator quick validator could not run because its separate PyYAML dependency is absent; frontmatter and relative reference targets were checked directly. No dependency was added for that optional validator.
+
 27 synthetic tests cover duplicate ingestion, URL variants including `ugcPost-` and URNs, fallback-ID promotion, edited posts and retained versions, confirmed requisition grouping, separate roles, pending-post recovery, bounded batches, repeated assessments and transaction rollback, verification routing, draft/provenance validation, DOCX/PDF pairing, application-event replay, spreadsheet tracking edits/conflicts, text/formula safety, long pending-post content, locked-export fallback, collection limits, uncertain similarity flags, and UTF-8 CLI output under Windows legacy encoding.
 
 Classification tests establish routing behavior, not independent semantic judgment. Helper evidence IDs and exact resume quotes cannot prove that a source supports a conclusion. Codex must review those conclusions. Locked exports are simulated with a PermissionError; no live Excel lock was exercised.

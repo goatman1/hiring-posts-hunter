@@ -20,6 +20,10 @@ Set resume_dir in private config.local.json. The default ../resumes points to th
 
 For a smaller run: `$job-search Find 30 candidates using "hiring scientist ml", Latest, Past week.` Short phrases are used for discovery; resume fit and hiring authority are checked afterward.
 
+Discovery now supports broad, ownership-phrase and employer/people search lanes. Set `search_strategy`, `intent_queries`, `target_companies`, `author_titles` and `author_max_age_days` in private configuration. For initial research ask for relevance / past month; monitoring retains latest / past week. Codex screens obvious mismatches before profile and JD visits, reuses fresh author evidence, then scores supported roles. Company or title filters are discovery hints, not proof of US location or team ownership.
+
+For a controlled pilot: `$job-search Compare broad, intent and employer searches with 10 posts, 3 profile checks and 2 JD checks per arm; relevance, past month; declare queries and scopes before collection.` The local comparison helper preserves the protocol, evidence and per-arm results. See [the live pilot](SEARCH_COMPARISON.md): targeted queries did not outperform the broad baseline in that small sample.
+
 Also ask to review shortlisted roles, prepare application answers, record actual application/contact activity, or show pending follow-ups. Follow-up dates are tracking records, not scheduled notifications. The workflow drafts but does not submit, upload, or send.
 
 The skill lives in .agents/skills/job-search; references/commands.md documents helper JSON interfaces. Outputs live in ignored .local. Excel tabs: Shortlist, Needs Review, Candidates, Excluded, Applications, Runs. Edit tracking fields only; ask Codex to sync before regeneration. Conflicting edits require review. Previously contacted/applied/dismissed leads do not resurface as new.

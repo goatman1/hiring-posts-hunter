@@ -137,6 +137,9 @@ class Hunter:
             return self.dispatch(command, data)
 
     def dispatch(self, command, data):
+        from discovery import COMMANDS, dispatch
+        if command in COMMANDS:
+            return dispatch(self, command, data)
         if command == 'init':
             return {'data_dir': str(self.directory), 'schema_version': 1}
         if command == 'start-run':
@@ -158,9 +161,10 @@ class Hunter:
                     raise ValueError(f'{field} must be a positive integer')
             if any(v not in {'off', 'flag', 'enforce'} for v in config['filters'].values()):
                 raise ValueError('Invalid semantic filter mode')
+            plan = dispatch(self, 'search-plan', {'config': config})
             run = dict(id=uuid.uuid4().hex, config=config, started=now(), posts=[], new_posts=[], inspected=[], loads=0, stalled=0, elapsed_seconds=0, stop_reason=None, progress={}, resumes=load_resumes(config['resume_dir']))
             self.put('run', run['id'], run)
-            return {'run_id': run['id'], 'config': config}
+            return {'run_id': run['id'], 'config': config, 'search_plan': plan}
         if command in {'run-status', 'checkpoint', 'ingest-posts', 'analysis-batch', 'save-assessments'}:
             run = self.get('run', data['run_id'])
         if command == 'run-status':
