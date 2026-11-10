@@ -4,6 +4,25 @@ Find relevant hiring-manager posts, verify who is actually hiring, match opportu
 
 This repository delivers one local Codex skill, invoked with `$job-search`, plus Python helpers for persistence and Excel synchronization. Codex performs browser research and reasoning using capabilities available in its session. The helpers validate and store findings; they make no browser, network or model calls.
 
+## Inputs and outputs at a glance
+
+| Input | What to provide |
+|---|---|
+| **Required: resume** | One or more text-readable DOCX/PDF resumes in `../resumes`, or set `resume_dir` to your folder. Matching DOCX/PDF filename stems count as one variant. |
+| **Required for live collection: LinkedIn access** | A connected Codex browser with your normal LinkedIn login. |
+| Optional: job preferences | Desired role family, seniority, locations, skills and target companies. State these in your Codex request; otherwise the workflow uses its defaults and your resume. |
+| Optional: collection settings | Keyword search or Home **For you**, keywords, post count, and search sort/date filters. |
+| Optional: eligibility details | Availability date and future sponsorship needs, kept in private `config.local.json`. |
+
+Set reusable preferences in `config.local.json`; give one-run preferences directly to `$job-search`. See [configuration](#configure-your-search) for supported fields and defaults.
+
+| Output file (default path) | What it contains |
+|---|---|
+| **`.local/leads.xlsx`** | Reviewable **Shortlist, Needs Review, Candidates, Excluded, Applications and Runs** tabs, including source links, match scores, selected resumes, outreach drafts and tracking fields. Created or refreshed when the workbook is synchronized. |
+| **`.local/jobs.sqlite3`** | Persistent posts, full captured candidate content, evidence, assessments, resume extracts, deduplication records, application history and run checkpoints. Reused across runs. |
+
+Both outputs stay local and are ignored by Git. Codex also reports collection totals, useful matches, unresolved checks and the stop reason in chat. Outreach messages are drafts for your review.
+
 ## Why build this 
 
 A keyword match is only the beginning. A post can advertise an overseas position, come from an external recruiter, describe a senior-only opening, or discuss hiring without offering a job. Even “my team is hiring” can be written by an individual contributor. Useful outreach requires evidence about the **author, employer, team and specific role**.
