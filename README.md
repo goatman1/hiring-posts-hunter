@@ -4,6 +4,11 @@ Find relevant hiring-manager posts, verify who is actually hiring, match opportu
 
 This repository delivers one local Codex skill, invoked with `$job-search`, plus Python helpers for persistence and Excel synchronization. Codex performs browser research and reasoning using capabilities available in its session. The helpers validate and store findings; they make no browser, network or model calls.
 
+## Why build this
+With the development of auto job application using personal agents, nowadays job hunting has a more important timing problem nobody tells you about: the same post that gets you an interview at hour one gets you ignored at hour ten, buried under a hundred other applicants who saw it first. "ETL QA" hiring posts go up constantly, scattered across the feed between recruiter spam and unrelated updates — and by the time I'd manually search, scroll, and actually read through them, the good ones were already old news. Also, it will bring you a small advantage if you could reach out the hiring manager directly.
+
+The honest fix was showing up first, every single day, without fail. But "check LinkedIn obsessively" isn't a strategy, it's a part-time job I didn't sign up for. So I did what any engineer with a job search and too much stubbornness does: automated the part of the hunt that shouldn't need a human — logging in, searching, reading, filtering, and drafting direct message — and kept the part that does — actually deciding who to reach out to — for myself.
+
 ## Inputs and outputs at a glance
 
 | Input | What to provide |
@@ -23,7 +28,7 @@ Set reusable preferences in `config.local.json`; give one-run preferences direct
 
 Both outputs stay local and are ignored by Git. Codex also reports collection totals, useful matches, unresolved checks and the stop reason in chat. Outreach messages are drafts for your review.
 
-## Why build this 
+## Design
 
 A keyword match is only the beginning. A post can advertise an overseas position, come from an external recruiter, describe a senior-only opening, or discuss hiring without offering a job. Even “my team is hiring” can be written by an individual contributor. Useful outreach requires evidence about the **author, employer, team and specific role**.
 
