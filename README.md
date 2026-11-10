@@ -18,6 +18,8 @@ Set resume_dir in private config.local.json. The default ../resumes points to th
 
 > $job-search Find 100 new tech and quant hiring posts from the past week and update my tracker.
 
+For a smaller run: `$job-search Find 30 candidates using "hiring scientist ml", Latest, Past week.` Short phrases are used for discovery; resume fit and hiring authority are checked afterward.
+
 Also ask to review shortlisted roles, prepare application answers, record actual application/contact activity, or show pending follow-ups. Follow-up dates are tracking records, not scheduled notifications. The workflow drafts but does not submit, upload, or send.
 
 The skill lives in .agents/skills/job-search; references/commands.md documents helper JSON interfaces. Outputs live in ignored .local. Excel tabs: Shortlist, Needs Review, Candidates, Excluded, Applications, Runs. Edit tracking fields only; ask Codex to sync before regeneration. Conflicting edits require review. Previously contacted/applied/dismissed leads do not resurface as new.

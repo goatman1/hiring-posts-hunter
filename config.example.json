@@ -12,9 +12,9 @@
   "future_sponsorship": null,
   "filters": {"location": "enforce", "title": "enforce", "skills": "flag", "start_date": "flag", "sponsorship": "flag"},
   "queries": [
-    {"track": "tech", "keywords": "hiring applied scientist machine learning"},
-    {"track": "quant", "keywords": "hiring quantitative researcher developer"},
-    {"track": "tech", "keywords": "my team hiring reinforcement learning robotics AI agents optimization"},
-    {"track": "quant", "keywords": "quant research hiring PhD graduate junior"}
+    {"track": "tech", "keywords": "hiring scientist ml"},
+    {"track": "quant", "keywords": "hiring quantitative researcher"},
+    {"track": "tech", "keywords": "hiring research scientist"},
+    {"track": "quant", "keywords": "hiring quant PhD"}
   ]
 }

@@ -135,4 +135,80 @@ class HunterTests(unittest.TestCase):
         self.assertIsNone(result['stop_reason'])
         self.assertEqual(self.app.get('run',self.run)['new_posts'],[])
 
+    def test_ugc_post_url_identity(self):
+        for url in ('https://www.linkedin.com/posts/test-ugcPost-123-xyz/', 'https://www.linkedin.com/feed/update/urn:li:ugcPost:123/'):
+            self.app.execute('ingest-posts', {'run_id':self.run,'posts':[dict(url=url,author_url='https://example.com/person',author_name='Test',content='Hiring')]})
+        self.assertEqual([p['id'] for p in self.app.all('post')], ['123'])
+
+    def test_pending_post_recovered_in_new_run(self):
+        self.ingest()
+        self.run=self.app.execute('start-run',{'config':self.config})['run_id']
+        self.assertEqual(self.ingest()['added'], [])
+        self.assertEqual(len(self.app.execute('analysis-batch',{'run_id':self.run})['posts']),1)
+        self.assertEqual(self.app.get('run',self.run)['new_posts'],[])
+
+    def test_batch_replay_does_not_change_counters(self):
+        request={'run_id':self.run,'batch_id':'page1','posts':[], 'loading_actions':2}
+        self.app.execute('ingest-posts',request)
+        self.app.execute('ingest-posts',request)
+        run=self.app.get('run',self.run)
+        self.assertEqual((run['loads'],run['stalled']), (2,1))
+        with self.assertRaises(ValueError):
+            self.app.execute('ingest-posts',dict(request,loading_actions=1))
+
+    def test_fallback_promotion_preserves_references(self):
+        post=dict(author_url='https://example.com/person',author_name='Test',content='Hiring')
+        key=self.app.execute('ingest-posts',{'run_id':self.run,'posts':[post]})['added'][0]
+        self.app.execute('ingest-posts',{'run_id':self.run,'posts':[dict(post,url='https://www.linkedin.com/posts/test-activity-123-xyz/')]})
+        self.app.execute('ingest-posts',{'run_id':self.run,'posts':[dict(post,url='https://www.linkedin.com/feed/update/urn:li:activity:123/',content='Edited hiring')]})
+        self.assertEqual(len(self.app.all('post')),1)
+        self.assertEqual(self.app.get('post',key)['content'],'Edited hiring')
+
+    def test_event_replay_preserves_later_status(self):
+        self.ingest(); key=self.save(self.assessment())['lead_id']
+        event={'lead_id':key,'event_id':'event','details':{'type':'application'},'edits':{'status':'applied'}}
+        self.app.execute('record-application',event)
+        self.app.execute('update-lead',{'lead_id':key,'edits':{'status':'interviewing'}})
+        self.app.execute('record-application',event)
+        self.assertEqual(self.app.get('lead',key)['status'],'interviewing')
+
+    def test_pending_workbook_keeps_content_and_ids(self):
+        self.ingest(content='x'*40000)
+        path=self.app.execute('sync-workbook',{})['path']
+        book=load_workbook(path)
+        headers=[c.value for c in book['Candidates'][1]]
+        row=dict(zip(headers,[c.value for c in book['Candidates'][2]]))
+        self.assertEqual(row['post_id'],'0')
+        self.assertIn('Full content:',row['original content'])
+        self.assertEqual((self.app.directory/'post-0.txt').read_text(), 'x'*40000)
+        book.close()
+
+    def test_similar_posts_flagged_not_merged(self):
+        self.ingest(2)
+        self.assertEqual(len(self.app.all('post')),2)
+        self.assertEqual(self.app.get('post','1')['similar_post_ids'],['0'])
+
+    def test_evidence_versions_retained(self):
+        self.ingest(); old=self.assessment()['checks']['manager']['evidence_ids'][0]
+        self.ingest(content='Edited'); new=self.assessment()['checks']['manager']['evidence_ids'][0]
+        self.assertNotEqual(old,new)
+        self.assertNotEqual(self.app.get('evidence',old)['content_digest'], self.app.get('evidence',new)['content_digest'])
+
+    def test_prior_post_and_assessment_retained(self):
+        self.ingest(); a=self.assessment(); self.save(a)
+        a['scores']['skills']=20; self.save(a)
+        self.ingest(content='Edited')
+        self.assertEqual(len(self.app.all('assessment-version')),2)
+        self.assertEqual(self.app.all('post-version')[0]['content'],'We hire researchers')
+
+    def test_unicode_cli_on_windows_encoding(self):
+        import os, subprocess, json
+        request=self.root/'request.json'
+        request.write_text(json.dumps({'run_id':self.run}),encoding='utf-8')
+        run=self.app.get('run',self.run); run['progress']['note']='科学 résumé'
+        with self.app.db: self.app.put('run',self.run,run)
+        result=subprocess.run([sys.executable,str(Path(workbook.__file__).with_name('job_hunter.py')),'run-status','--input',str(request),'--data-dir',str(self.app.directory)],capture_output=True,env=dict(os.environ,PYTHONIOENCODING='cp1252'))
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout.decode('utf-8'))['progress']['note'],'科学 résumé')
+
 if __name__=='__main__': unittest.main()

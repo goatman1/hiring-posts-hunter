@@ -4,8 +4,16 @@ from datetime import datetime
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
-EDITABLE = ('status', 'notes', 'next_action', 'follow_up_date', 'application_date')
-COLUMNS = ('role', 'posted date', 'original content', 'poster name', 'poster position', 'match score', 'reach out message', 'lead_id', 'company', 'track', 'post_url', 'profile_url', 'verification', 'resume', 'eligibility flags', *EDITABLE)
+EDITABLE = ('status', 'notes', 'next_action', 'follow_up_date', 'application_date', 'selected_resume')
+COLUMNS = ('role', 'posted date', 'original content', 'poster name', 'poster position', 'match score', 'reach out message', 'lead_id', 'company', 'track', 'post_url', 'profile_url', 'verification', 'resume', 'eligibility flags', *EDITABLE, 'post_id', 'date_precision', 'captured_at', 'source_urls', 'similar_post_ids')
+
+def source_content(app, post):
+    content = post['content']
+    if len(content) > 32000:
+        source = app.directory / ('post-' + post['id'] + '.txt')
+        source.write_text(content, encoding='utf-8')
+        return content[:31000] + '\nFull content: ' + str(source)
+    return content
 
 def write_row(sheet, values):
     sheet.append([str(v) if v is not None else '' for v in values])
@@ -56,12 +64,9 @@ def sync(app):
     for lead in app.all('lead'):
         a = lead['assessment']
         post = app.get('post', a['post_id'])
-        content = post['content']
-        if len(content) > 32000:
-            source = app.directory / ('post-' + post['id'] + '.txt')
-            source.write_text(content, encoding='utf-8')
-            content = content[:31000] + '\nFull content: ' + str(source)
+        content = source_content(app, post)
         values = (a['role'], post['posted_date'], content, post['author_name'], post['author_position'], lead['match_score'], a['message'], lead['id'], a['company'], post['track'], post['url'], post['author_url'], json.dumps(a['checks']), a['resume_id'], '; '.join(a['flags']), *(lead.get(k, '') for k in EDITABLE))
+        values += (post['id'], post['date_precision'], post['first_seen'], '\n'.join(app.get('post', p)['url'] for p in lead['post_ids']), '\n'.join(post.get('similar_post_ids', [])))
         write_row(sheets['Candidates'], values)
         if lead['bucket'] != 'Candidates' and not (lead['bucket'] == 'Shortlist' and lead['status'] in HISTORY):
             write_row(sheets[lead['bucket']], values)
@@ -69,7 +74,10 @@ def sync(app):
     assessed = {p for l in app.all('lead') for p in l['post_ids']}
     for post in app.all('post'):
         if post['id'] not in assessed:
-            write_row(sheets['Candidates'], ('Pending analysis', post['posted_date'], post['content'][:32000], post['author_name'], post['author_position'], '', '', '', '', post['track'], post['url'], post['author_url']))
+            values = ('Pending analysis', post['posted_date'], source_content(app, post), post['author_name'], post['author_position'], '', '', '', '', post['track'], post['url'], post['author_url'])
+            values += ('',) * (len(COLUMNS) - 5 - len(values))
+            values += (post['id'], post['date_precision'], post['first_seen'], post['url'], '\n'.join(post.get('similar_post_ids', [])))
+            write_row(sheets['Candidates'], values)
     write_row(sheets['Applications'], ('event_id', 'lead_id', 'recorded_at', 'details'))
     for event in app.all('event'):
         write_row(sheets['Applications'], (event['id'], event['lead_id'], event['recorded_at'], json.dumps(event['details'])))

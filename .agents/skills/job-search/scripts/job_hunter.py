@@ -28,6 +28,16 @@ def canonical(url):
     parts = urlsplit(url)
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip('/'), '', ''))
 
+def similar_content(left, right):
+    # Bounded linear-time lexical hint, never evidence that two roles are the same.
+    def shingles(text):
+        words = text.casefold().split()
+        return set(zip(words, words[1:], words[2:]))
+    if left == right:
+        return True
+    a, b = shingles(left), shingles(right)
+    return bool(a and b) and len(a & b) / len(a | b) >= 0.85
+
 class Strict(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -164,18 +174,46 @@ class Hunter:
             self.put('run', run['id'], run)
             return {'stop_reason': run['stop_reason']}
         if command == 'ingest-posts':
+            batch_key = digest(run['id'] + '|' + data['batch_id']) if data.get('batch_id') else None
+            request_digest = digest(json.dumps(data, sort_keys=True))
+            if batch_key:
+                previous = next((b for b in self.all('ingestion') if b['id'] == batch_key), None)
+                if previous:
+                    if previous['request_digest'] != request_digest:
+                        raise ValueError('Conflicting repeated ingestion batch_id')
+                    return previous['result']
             if run['stop_reason']:
                 return {'added': [], 'stop_reason': run['stop_reason']}
             posts = [Post.model_validate(p).model_dump() for p in data['posts']]
+            loading_actions = data.get('loading_actions', 1)
+            if type(loading_actions) is not int or loading_actions < 0:
+                raise ValueError('loading_actions must be a nonnegative integer')
             added = []
             for post in posts:
-                match = re.search(r'(?:activity[:\-]|ugcPost:|share[:\-])(\d+)', unquote(post['url']))
+                match = re.search(r'(?:activity|ugcPost|share)[:\-](\d+)', unquote(post['url']))
                 key = match.group(1) if match else digest(canonical(post['url']) if post['url'] else canonical(post['author_url']) + ' ' + ' '.join(post['content'].split()))
+                fingerprint = digest(canonical(post['author_url']) + ' ' + ' '.join(post['content'].split()))
+                prior_posts = self.all('post')
+                # Promote an exact fallback capture without changing IDs referenced by evidence/history.
+                alias = next((x for x in self.all('post-alias') if x['id'] == key), None)
+                if alias:
+                    key = alias['post_id']
+                else:
+                    fallback = [p for p in prior_posts if p.get('fingerprint') == fingerprint and (not p['url'] or not post['url'])]
+                    if len(fallback) == 1:
+                        self.put('post-alias', key, {'id': key, 'post_id': fallback[0]['id']})
+                        key = fallback[0]['id']
                 try:
                     old = self.get('post', key)
                 except ValueError:
                     old = None
+                if old and not post['url']:
+                    post['url'] = old['url']
+                similarities = [p['id'] for p in prior_posts if p['id'] != key and similar_content(p['content'], post['content'])]
                 post.update(id=key, content_digest=digest(post['content']), first_seen=old['first_seen'] if old else now(), last_seen=now())
+                post.update(fingerprint=fingerprint, similar_post_ids=similarities)
+                if old and old['content_digest'] != post['content_digest']:
+                    self.put('post-version', digest(key + old['content_digest']), old)
                 self.put('post', key, post)
                 if key not in run['inspected']:
                     run['inspected'].append(key)
@@ -191,24 +229,33 @@ class Hunter:
                             self.put('lead', lead['id'], lead)
                     if key not in run['posts']:
                         run['posts'].append(key)
+                elif key not in run['posts']:
+                    completed = any(a['post_id'] == key and a['content_digest'] == post['content_digest'] for a in self.all('assessment'))
+                    if not completed:
+                        run['posts'].append(key)
                 if len(run['new_posts']) >= run['config']['target_count'] or len(run['inspected']) >= run['config']['max_inspected']:
                     break
-            run['loads'] += 1
+            run['loads'] += loading_actions
             run['stalled'] = 0 if added else run['stalled'] + 1
             self.stop(run)
             self.put('run', run['id'], run)
-            return {'added': added, 'stop_reason': run['stop_reason']}
+            result = {'added': added, 'stop_reason': run['stop_reason']}
+            if batch_key:
+                self.put('ingestion', batch_key, {'id': batch_key, 'request_digest': request_digest, 'result': result})
+            return result
         if command == 'save-evidence':
             post = self.get('post', data['post_id'])
             if not data.get('quote') or not data.get('source_url'):
                 raise ValueError('Evidence requires source_url and quote')
-            key = digest(data['post_id'] + data['source_url'] + data['quote'])
+            key = digest(data['post_id'] + post['content_digest'] + data['source_url'] + data['quote'])
             self.put('evidence', key, dict(data, id=key, captured_at=now(), content_digest=post['content_digest']))
             return {'evidence_id': key}
         if command == 'analysis-batch':
             size = data.get('limit', 10)
-            if not 1 <= size <= 10:
+            if type(size) is not int or not 1 <= size <= 10:
                 raise ValueError('Batch limit must be 1..10')
+            if type(data.get('offset', 0)) is not int or data.get('offset', 0) < 0:
+                raise ValueError('offset must be a nonnegative integer')
             completed = {a['post_id']: a['content_digest'] for a in self.all('assessment')}
             posts = [self.get('post', k) for k in run['posts']]
             posts = [p for p in posts if completed.get(p['id']) != p['content_digest']][data.get('offset', 0):][:size]
@@ -250,10 +297,12 @@ class Hunter:
                 except ValueError:
                     lead = dict(id=key, post_ids=[], status='new', notes='', next_action='', follow_up_date='', application_date='')
                 lead.update(assessment=a, bucket=bucket, match_score=score, stale=False)
+                lead.setdefault('selected_resume', a['resume_id'])
                 if a['post_id'] not in lead['post_ids']:
                     lead['post_ids'].append(a['post_id'])
                 self.put('lead', key, lead)
                 self.put('assessment', digest(a['post_id'] + '|' + a['role'].casefold().strip()), a)
+                self.put('assessment-version', digest(json.dumps(a, sort_keys=True)), a)
                 result.append({'lead_id': key, 'bucket': bucket})
             return result
         if command == 'list-leads':
@@ -262,7 +311,7 @@ class Hunter:
         if command in {'update-lead', 'record-application'}:
             lead = self.get('lead', data['lead_id'])
             edits = data.get('edits', {})
-            if set(edits) - {'status', 'notes', 'next_action', 'follow_up_date', 'application_date'}:
+            if set(edits) - {'status', 'notes', 'next_action', 'follow_up_date', 'application_date', 'selected_resume'}:
                 raise ValueError('Unsupported tracking edit')
             if 'status' in edits and edits['status'] not in STATUSES:
                 raise ValueError('Invalid status')
@@ -275,6 +324,8 @@ class Hunter:
                     previous = None
                 if previous and (previous['lead_id'] != event['lead_id'] or previous['details'] != event['details']):
                     raise ValueError('Conflicting repeated event ID')
+                if previous:
+                    return self.get('lead', data['lead_id'])
                 self.put('event', event['id'], previous or event)
             self.put('lead', lead['id'], lead)
             return lead
@@ -290,6 +341,9 @@ class Hunter:
                 run['stop_reason'] = reason
 
 def main():
+    # Windows redirected stdout may otherwise reject Unicode in post/resume JSON.
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command')
     parser.add_argument('--input', type=Path)
