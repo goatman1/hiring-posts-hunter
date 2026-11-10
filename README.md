@@ -38,6 +38,49 @@ The implementation separates that research from durable record keeping:
 
 No custom MCP server, extra installation, or agent framework is required. The skill runs when invoked in Codex; it is not a background crawler or scheduler.  
 
+## Agent architecture and harness
+
+Codex provides the **harness**: the session that runs the coordinator, exposes browser and local execution tools, and supports optional analysis workers. The repository supplies the skill instructions and tracking helpers that the coordinator uses.
+
+```mermaid
+flowchart TB
+    U["You: request, preferences and review"]
+    S["Repository skill: SKILL.md + references<br/>Search/feed procedures, evidence rules, worker contract"]
+
+    subgraph CODEX["Existing Codex session / harness"]
+        C["Coordinator agent<br/>Plan, collect, verify, audit and checkpoint"]
+        B["Connected browser tools<br/>Existing LinkedIn login"]
+        W["Optional analysis workers: up to 3<br/>Disjoint batches of at most 10 posts"]
+        T["Local execution tool"]
+        C -->|"Navigate and read"| B
+        B -->|"Observed source evidence"| C
+        C -->|"Saved evidence + relevant resume excerpts"| W
+        W -->|"Structured assessments / evidence requests"| C
+        C -->|"JSON helper commands"| T
+        T -->|"Results, validation errors and stop reasons"| C
+    end
+
+    L["LinkedIn and linked job pages<br/>Search, For you, profiles and job requirements"]
+    H["Local Python helpers<br/>Validate, deduplicate, persist and sync Excel"]
+    P["Private inputs<br/>Resumes + config.local.json"]
+    D[(".local/jobs.sqlite3<br/>Posts, evidence, assessments, history and run state")]
+    X[".local/leads.xlsx<br/>Review tabs and editable tracking fields"]
+
+    U -->|"Invoke $job-search"| C
+    S -->|"Workflow instructions"| C
+    B <-->|"Visible page interaction"| L
+    T -->|"Run job_hunter.py"| H
+    P -->|"Read config and extract resumes"| H
+    H <-->|"Read / write"| D
+    H -->|"Export workbook"| X
+    X -->|"Import supported edits"| H
+    X -->|"Review leads and drafts"| U
+    U -->|"Tracking edits"| X
+    C -->|"Findings and next actions"| U
+```
+
+The coordinator is the only agent that browses or invokes database-writing commands. Workers reason over supplied evidence and return results to it; helpers perform local data operations without model calls or browsing. SQLite holds durable state across chats and runs, while Excel is the review surface. External page content remains untrusted evidence, and outreach or application submission remains a user action.
+
 ## Workflow
 
 ```mermaid
