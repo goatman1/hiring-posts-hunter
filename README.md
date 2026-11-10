@@ -1,10 +1,10 @@
 # Codex Job Hunter
 
-Find relevant hiring-manager posts, verify who is actually hiring, match opportunities to your resumes, and keep a local application tracker. The default scope is **US full-time junior, new-grad and PhD-entry tech and quant roles**.
+Find relevant hiring-manager posts, verify who is actually hiring, match opportunities to your resumes, and keep a local application tracker. The default scope is **full-time internship, junior, new-grad, and PhD-entry tech and quant roles**.
 
 This repository delivers one local Codex skill, invoked with `$job-search`, plus Python helpers for persistence and Excel synchronization. Codex performs browser research and reasoning using capabilities available in its session. The helpers validate and store findings; they make no browser, network or model calls.
 
-## Why this design
+## Why build this 
 
 A keyword match is only the beginning. A post can advertise an overseas position, come from an external recruiter, describe a senior-only opening, or discuss hiring without offering a job. Even “my team is hiring” can be written by an individual contributor. Useful outreach requires evidence about the **author, employer, team and specific role**.
 
@@ -17,7 +17,7 @@ The implementation separates that research from durable record keeping:
 | Validate records, deduplicate, save history and export Excel | Local Python helpers and SQLite | Makes repeated runs, retries and tracking edits predictable. |
 | Review drafts and perform outreach or application submission | You | Separates a prepared draft from an action actually taken. |
 
-No custom MCP server, separate Chromium installation, browser automation library, model API credential or agent framework is required. The skill runs when invoked in Codex; it is not a background crawler or scheduler. This implementation is independent of `hack-job-market` and does not use its configuration or data.
+No custom MCP server, extra installation, or agent framework is required. The skill runs when invoked in Codex; it is not a background crawler or scheduler.  
 
 ## Workflow
 
