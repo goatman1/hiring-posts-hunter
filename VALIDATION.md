@@ -4,6 +4,18 @@ Tested with the existing Codex Python 3.12.14 runtime and Pydantic, openpyxl, py
 
 ## Automated checks
 
+The For you update passes 44 tests total: the previous 35 plus 9 feed tests. Coverage includes all-card inspection counts independent of new-candidate targets, input/batch bounds, transactional rollback, replay-safe time/load counters, stalled loading versus new non-hiring cards, cross-source and repeat-day deduplication, fallback-permalink promotion, interrupted-run recovery, preservation of applied status on edits, and workbook source/counter columns.
+
+## For you smoke test — November 10, 2026
+
+The existing authenticated LinkedIn tab visibly had For you selected and Sort by Top. Two Load more actions supplied a bounded sample of ten actual outer post cards. A people-recommendation widget labeled Feed post was excluded from the count. The sample contained six non-hiring posts, three sponsored cards and one student-internship-only opening, yielding zero candidates for the configured full-time junior/PhD-entry scope. Recommendations were not treated as evidence of managerial hiring.
+
+The new ingest-feed command persisted ten minimal screening records, stopped with feed_target_reached, and returned the identical result on batch replay without increasing counters. Workbook synchronization succeeded. Private request/report files are in .local/feed-smoke-request.json and .local/feed-smoke-report.json. Rejected-post fallback fingerprints used observed outer authors and distinctive text excerpts; one direct outer post ID was available. Unrelated full bodies were not persisted. Active collection seconds were not instrumented for this manual smoke test; time-limit behavior is covered synthetically.
+
+This tests source selection, incremental loading, bounded screening, persistence and replay. It does not establish feed precision, live positive-candidate capture/assessment, or unattended browser availability. Candidate ingestion, shared history, edits and source provenance are covered by synthetic tests. Scheduling was explicitly deferred by the user: no automation was created or activated. The feed reference contains a reusable prompt for later scheduling through Codex.
+
+## Earlier validation
+
 The strategy update passes 35 tests total: the 27 baseline tests below plus 8 tests for search mode/scope resolution, author evidence freshness/history, employer-change revalidation, fixed comparison protocols, interrupted comparisons, action caps, cached-evidence charging, replay conflicts, per-arm overlap and distinct-author counting. Unknown author location, management, affiliation or team ownership cannot count as a verified manager. [The equal-cap live comparison](SEARCH_COMPARISON.md) records the three-arm tech pilot and its limitations.
 
 The search-plan CLI and live comparison persistence/replay were exercised. The eligible source was added to the existing tracker and the workbook synchronized successfully without duplicate ingestion. The skill-creator quick validator could not run because its separate PyYAML dependency is absent; frontmatter and relative reference targets were checked directly. No dependency was added for that optional validator.

@@ -5,7 +5,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
 EDITABLE = ('status', 'notes', 'next_action', 'follow_up_date', 'application_date', 'selected_resume')
-COLUMNS = ('role', 'posted date', 'original content', 'poster name', 'poster position', 'match score', 'reach out message', 'lead_id', 'company', 'track', 'post_url', 'profile_url', 'verification', 'resume', 'eligibility flags', *EDITABLE, 'post_id', 'date_precision', 'captured_at', 'source_urls', 'similar_post_ids')
+COLUMNS = ('role', 'posted date', 'original content', 'poster name', 'poster position', 'match score', 'reach out message', 'lead_id', 'company', 'track', 'post_url', 'profile_url', 'verification', 'resume', 'eligibility flags', *EDITABLE, 'post_id', 'date_precision', 'captured_at', 'source_urls', 'similar_post_ids', 'discovery_sources')
 
 def source_content(app, post):
     content = post['content']
@@ -60,6 +60,9 @@ def sync(app):
     for name in ('Shortlist', 'Needs Review', 'Candidates', 'Excluded'):
         write_row(sheets[name], COLUMNS)
     from job_hunter import HISTORY
+    sightings = app.all('post-sighting')
+    def sources(post_ids):
+        return ', '.join(sorted({s['source'] for s in sightings if s['post_id'] in post_ids}))
     baseline = {}
     for lead in app.all('lead'):
         a = lead['assessment']
@@ -67,6 +70,7 @@ def sync(app):
         content = source_content(app, post)
         values = (a['role'], post['posted_date'], content, post['author_name'], post['author_position'], lead['match_score'], a['message'], lead['id'], a['company'], post['track'], post['url'], post['author_url'], json.dumps(a['checks']), a['resume_id'], '; '.join(a['flags']), *(lead.get(k, '') for k in EDITABLE))
         values += (post['id'], post['date_precision'], post['first_seen'], '\n'.join(app.get('post', p)['url'] for p in lead['post_ids']), '\n'.join(post.get('similar_post_ids', [])))
+        values += (sources(lead['post_ids']),)
         write_row(sheets['Candidates'], values)
         if lead['bucket'] != 'Candidates' and not (lead['bucket'] == 'Shortlist' and lead['status'] in HISTORY):
             write_row(sheets[lead['bucket']], values)
@@ -75,15 +79,18 @@ def sync(app):
     for post in app.all('post'):
         if post['id'] not in assessed:
             values = ('Pending analysis', post['posted_date'], source_content(app, post), post['author_name'], post['author_position'], '', '', '', '', post['track'], post['url'], post['author_url'])
-            values += ('',) * (len(COLUMNS) - 5 - len(values))
+            values += ('',) * (len(COLUMNS) - 6 - len(values))
             values += (post['id'], post['date_precision'], post['first_seen'], post['url'], '\n'.join(post.get('similar_post_ids', [])))
+            values += (sources([post['id']]),)
             write_row(sheets['Candidates'], values)
     write_row(sheets['Applications'], ('event_id', 'lead_id', 'recorded_at', 'details'))
     for event in app.all('event'):
         write_row(sheets['Applications'], (event['id'], event['lead_id'], event['recorded_at'], json.dumps(event['details'])))
-    write_row(sheets['Runs'], ('run_id', 'started', 'posts', 'loads', 'elapsed_seconds', 'stop_reason', 'progress'))
+    write_row(sheets['Runs'], ('run_id', 'started', 'posts', 'loads', 'elapsed_seconds', 'stop_reason', 'progress', 'collection_source', 'inspected_count', 'feed_dispositions', 'new_candidates'))
     for run in app.all('run'):
-        write_row(sheets['Runs'], (run['id'], run['started'], len(run['posts']), run['loads'], run['elapsed_seconds'], run['stop_reason'], json.dumps(run['progress'])))
+        source = run['config'].get('collection_source', 'search')
+        inspected = len(run.get('feed_inspected', [])) if source == 'for_you' else len(run['inspected'])
+        write_row(sheets['Runs'], (run['id'], run['started'], len(run['posts']), run['loads'], run['elapsed_seconds'], run['stop_reason'], json.dumps(run['progress']), source, inspected, json.dumps(run.get('feed_counts', {})), len(run['new_posts'])))
     for sheet in book:
         sheet.freeze_panes = 'A2'
         sheet.auto_filter.ref = sheet.dimensions

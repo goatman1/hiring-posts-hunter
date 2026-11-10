@@ -24,8 +24,11 @@ No custom MCP server, extra installation, or agent framework is required. The sk
 ```mermaid
 flowchart TD
     A[Invoke $job-search] --> B[Resolve private config and resume variants]
-    B --> C[Plan broad, intent and employer searches]
-    C --> D[Codex browses and verifies visible filters]
+    B --> C[Choose keyword search or For you scan]
+    C --> CS[Plan broad, intent and employer searches]
+    C --> CF[Set a distinct feed-post inspection budget]
+    CS --> D[Codex browses and verifies selected source]
+    CF --> D
     D --> E[Capture posts and evidence; deduplicate in SQLite]
     E --> F[Screen post and role card]
     F -->|Explicit mismatch| X[Excluded with evidence]
@@ -78,6 +81,8 @@ Edit **`config.local.json`**, which is ignored by Git. [config.example.json](con
 ```json
 {
   "target_count": 30,
+  "collection_source": "search",
+  "feed_post_count": 50,
   "search_strategy": "hybrid",
   "search_phase": "discovery",
   "sort_by": "relevance",
@@ -123,6 +128,8 @@ Private config replaces top-level values, including whole query lists and the wh
 
 | Setting | Default | Meaning / supported values |
 |---|---|---|
+| `collection_source` | `search` | `search` for keyword research or `for_you` for the recommended Home feed. |
+| `feed_post_count` | `50` | Distinct feed posts to inspect, from 1 to 500; applies only to `for_you`. |
 | `search_strategy` | `hybrid` | `broad`, `intent`, `employer`, or `hybrid` to combine the three. |
 | `search_phase` | `monitoring` | `discovery` for initial research or `monitoring` for repeat searches; does not schedule runs. |
 | `queries` | Alternating tech/quant phrases | Nonempty list of `{track, keywords}` records. Track is `tech` or `quant`; used by broad and employer searches. |
@@ -178,6 +185,7 @@ Seven core checks always remain required: active hiring, full-time employment, j
 |---|---|
 | Initial discovery | `$job-search Find 30 new candidates using hybrid search, Top Match and Past month. Prioritize applied ML research and quantitative research.` |
 | Repeat monitoring | `$job-search Find 100 new tech and quant posts, Latest and Past week. Reuse fresh author evidence and update my tracker.` |
+| Scan recommendations | `$job-search Inspect 50 distinct posts in LinkedIn Home For you, collect relevant hiring posts, verify authors and update my tracker.` |
 | Narrow criteria | `$job-search Focus on full-time PhD-entry research roles in New York or Seattle. Treat Python and reinforcement learning as preferred skills.` |
 | Resume work | `$job-search Inspect saved run progress and continue pending reviews. Keep existing application history.` |
 | Review candidates | `$job-search Review Needs Review records, identify missing evidence, and explain each decision.` |
@@ -186,6 +194,22 @@ Seven core checks always remain required: active hiring, full-time employment, j
 | Sync Excel edits | `$job-search Import my supported tracking edits from the workbook and regenerate it.` |
 
 The workflow drafts 70–120 word LinkedIn messages and can prepare application answers. It does not send messages, request connections, upload resumes or submit applications. Application history records actual reported or observed actions. Follow-up dates are tracking fields, not scheduled reminders.
+
+### Scan the Home / For you feed
+
+Recommendations can surface hiring posts outside your keyword queries. Use the **same skill and database** so a post discovered in search and again in the feed remains one tracked source. Set `collection_source` to `for_you` and `feed_post_count` to the desired inspection count, or supply both in your request. Search remains the default; hybrid refers to combining search approaches, not automatically scanning the feed.
+
+The feed count means **all distinct post cards inspected**, including unrelated posts and sponsored cards, not a target number of hiring matches. Sponsored cards are recorded as skipped; people suggestions, sidebar widgets and nested reposts are not extra posts. Repeated cards count once within a run. Previously seen posts count toward a new day's inspection budget without becoming new leads. Codex preserves the displayed recommendation ordering; keyword search filters, `sort_by`, `date_posted` and `target_count` do not apply to this source. Recommendation today does not imply that a vacancy is recent or still open.
+
+The coordinator uses `ingest-feed` to save batches of up to ten screening decisions. Minimal IDs and reasons are retained for skipped posts; relevant candidates retain expanded content and source evidence. New non-hiring posts still count as progress. Collection stops at X inspected posts or an earlier inspection/load/time/stall/access limit. The same US-author, manager, affiliation, own-team and role eligibility checks then apply. For both search and feed in one session, create separate bounded runs against the same tracker.
+
+### Schedule it later
+
+Scheduling is optional and managed through Codex's native automation capability. **No schedule is installed by this repository or by adding feed mode.** When ready, ask:
+
+> Schedule $job-search in this repository to inspect 50 distinct Home For you posts daily at 9 AM America/New_York, verify relevant hiring posts, and update the existing local tracker.
+
+The [feed workflow](.agents/skills/job-search/references/feed.md) includes a reusable task prompt. Keep the existing checkout and `.local` database available between runs. Use an ongoing-chat task unless you want a separate standalone run; avoid overlapping collectors. Local-file tasks require the computer on and app running according to the [official scheduling documentation](https://learn.chatgpt.com/docs/automations?surface=app). Browser access and LinkedIn login must also be available in the scheduled session. If either is missing, the run checkpoints and reports incomplete collection. A manual smoke test does not establish unattended browser access; validate the first scheduled execution separately.
 
 ## Matching and review
 
@@ -212,7 +236,7 @@ The default workbook is **`.local/leads.xlsx`**:
 | Candidates | Master view of assessed leads plus pending posts; rows can also appear in a review tab. |
 | Excluded | Assessed roles with confirmed required mismatches. |
 | Applications | Recorded application/contact/activity events. |
-| Runs | Collection progress, counters and stop reasons. |
+| Runs | Collection source, inspection/candidate totals, feed dispositions, counters and stop reasons. |
 
 Edit only **`status`, `selected_resume`, `application_date`, `next_action`, `follow_up_date`, `notes`**. Preserve stable IDs. Supported statuses are `new`, `reviewing`, `shortlisted`, `saved`, `contacted`, `applied`, `interviewing`, `offer`, `rejected`, `withdrawn`, `dismissed`, and `closed`. Pending post rows have no lead ID yet and are not editable lead records.
 
@@ -267,10 +291,11 @@ In the [November 10 pilot](SEARCH_COMPARISON.md), broad / phrase / employer sear
 python -m unittest discover -s tests -v
 ```
 
-The current suite has 35 passing tests covering local data integrity, routing, history, workbook edits, comparison budgets and author-cache behavior. Tests use synthetic data and temporary databases. [VALIDATION.md](VALIDATION.md) distinguishes automated checks from live validation and records limitations. Existing browser access does not remove LinkedIn's restrictions or access controls; keep research bounded and stop on challenges.
+The current suite has 44 passing tests covering local data integrity, routing, history, workbook edits, comparison budgets, author-cache behavior and bounded feed scanning. Tests use synthetic data and temporary databases. [VALIDATION.md](VALIDATION.md) distinguishes automated checks from live validation and records limitations. Existing browser access does not remove LinkedIn's restrictions or access controls; keep research bounded and stop on challenges.
 
 - [Skill entry point](.agents/skills/job-search/SKILL.md): coordinator workflow and delegation.
 - [Discovery strategy](.agents/skills/job-search/references/discovery.md): search selection, screening and comparison protocol.
 - [Browser workflow](.agents/skills/job-search/references/browser.md): capture, pagination, checkpoints and verification.
+- [For you feed workflow](.agents/skills/job-search/references/feed.md): inspection counting, feed capture and a reusable scheduling prompt.
 - [Assessment contract](.agents/skills/job-search/references/assessment.md): evidence checks, scoring and drafts.
 - [Helper API](.agents/skills/job-search/references/commands.md): structured local commands.

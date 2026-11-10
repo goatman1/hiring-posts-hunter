@@ -122,6 +122,17 @@ def immutable(hunter, kind, key, record):
 def dispatch(hunter, command, data):
     if command == 'search-plan':
         config = data.get('config', {})
+        source = config.get('collection_source', 'search')
+        count = config.get('feed_post_count', 50)
+        if source not in ('search', 'for_you'):
+            raise ValueError('collection_source must be search or for_you')
+        if type(count) is not int or not 1 <= count <= 500:
+            raise ValueError('feed_post_count must be an integer from 1 to 500')
+        if source == 'for_you':
+            return {'collection_source': source, 'feed_post_count': count,
+                    'feed_url': 'https://www.linkedin.com/feed/foryou/',
+                    'order': 'LinkedIn recommendations; verify For you selection',
+                    'date_filter': 'No search date filter applied', 'lanes': []}
         strategy = config.get('search_strategy', 'hybrid')
         phase = config.get('search_phase', 'monitoring')
         if strategy not in ('hybrid', 'broad', 'intent', 'employer') or phase not in ('discovery', 'monitoring'):
@@ -157,7 +168,7 @@ def dispatch(hunter, command, data):
         date_posted = config.get('date_posted', 'past_month' if phase == 'discovery' else 'past_week')
         if sort_by not in ('relevance', 'date_posted') or date_posted not in ('past_month', 'past_week', 'past_24_hours', 'all_time'):
             raise ValueError('Unsupported sort/date filter')
-        return {'strategy': strategy, 'phase': phase, 'sort_by': sort_by, 'date_posted': date_posted, 'author_max_age_days': ttl, 'lanes': lanes}
+        return {'collection_source': source, 'strategy': strategy, 'phase': phase, 'sort_by': sort_by, 'date_posted': date_posted, 'author_max_age_days': ttl, 'lanes': lanes}
     if command == 'save-author':
         record = Author.model_validate(data).model_dump()
         key = record['author_url']

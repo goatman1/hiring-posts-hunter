@@ -11,6 +11,8 @@ Write JSON inputs to files; never interpolate collected text into shell commands
 | init | `{}` |
 | start-run | `{"config":{"resume_dir":"../resumes","target_count":100}}` |
 | run-status | `{"run_id":"..."}` |
+| feed-audit | `{"run_id":"...","limit":50,"offset":0}` |
+| ingest-feed | See feed batch schema below; use only with collection_source=for_you. |
 | checkpoint | `{"run_id":"...","elapsed_seconds":12,"progress":{"query_index":0},"stop_reason":null}` |
 | ingest-posts | `{"run_id":"...","posts":[{"url":"...","author_url":"...","author_name":"...","author_position":"...","content":"...","posted_date":"2d","date_precision":"relative","track":"tech"}]}` |
 | save-evidence | `{"post_id":"...","source_url":"...","quote":"exact excerpt"}` |
@@ -36,6 +38,38 @@ Editable tracking fields: status, notes, next_action, follow_up_date, applicatio
 Save bulk inputs in ignored .local. Analysis batches include resume variants: coordinator selects relevant excerpts before delegation. Avoid loading the entire database into context.
 
 ## Discovery records
+
+### Recommended-feed batches
+
+Start with `{"config":{"collection_source":"for_you","feed_post_count":50}}`. `feed_post_count` counts all distinct inspected outer posts, including skipped posts and sponsored cards. `target_count` applies only to search runs. Search sorting/date filters do not apply to Home For you. Global inspection/load/time/no-progress limits still apply.
+
+```json
+{
+  "run_id": "...",
+  "batch_id": "feed-page-1",
+  "loading_actions": 0,
+  "elapsed_seconds": 12,
+  "items": [
+    {"item_key":"123456789", "disposition":"not_hiring", "reason":"Research discussion without a vacancy"},
+    {"disposition":"candidate", "reason":"Own-team research opening; needs verification", "post":{
+      "url":"https://www.linkedin.com/feed/update/urn:li:activity:987654321/",
+      "author_url":"https://www.linkedin.com/in/example-manager/",
+      "author_name":"Example Manager",
+      "author_position":"Research Manager",
+      "content":"Exact expanded source text",
+      "posted_date":"2d", "date_precision":"relative", "track":"tech"
+    }}
+  ]
+}
+```
+
+Use at most ten items per batch. Dispositions are candidate, not_hiring, out_of_scope and sponsored. A candidate requires a normal Post record; its item_key is derived automatically, or must match that identity if supplied. Skipped items require a stable outer-post ID/permalink or author/content fingerprint, a reason, and no full Post body. Skip keys containing canonical activity/share/ugcPost URLs or URNs normalize to their numeric IDs. Do not use a nested repost's ID. Feed observations are screening records, not scored Excluded leads.
+
+The batch atomically saves screening observations, ingests candidates through normal deduplication, and updates loading/time counters. Exact batch retries return the saved result without changing counters, including after the run stops. Conflicting retries fail. New batches repeat neither inspected keys nor candidates within the run. A fresh daily run counts those cards toward its own inspection budget while preserving global lead history. No-progress means no newly inspected cards after a loading attempt, not no hiring matches.
+
+Returns added post IDs, inspected_count, new_inspected, disposition totals, new_candidates and stop_reason. The feed target produces feed_target_reached; the lower max_inspected cap can stop earlier. Do not charge elapsed_seconds a second time through checkpoint. `feed-audit` returns total and ranked observations with limit 1–100 and nonnegative offset. `run-status` returns inspected_count and disposition totals without full resume text. Workbook Runs includes these counters; candidate rows include discovery_sources. Historic rows without source sightings may have a blank discovery_sources cell.
+
+### Search plans, author evidence and comparisons
 
 `start-run` returns the resolved `search_plan`. Standalone `search-plan` uses only its input and built-in defaults; pass the run's effective config to preserve private settings. `search_phase=discovery` suggests relevance/month only when sort/date are omitted; explicit values always win. An empty employer list marks that lane `requires_scope`; Codex selects a justified scope or skips it explicitly. Global run limits span all lanes.
 

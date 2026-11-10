@@ -1,5 +1,7 @@
 {
   "target_count": 100,
+  "collection_source": "search",
+  "feed_post_count": 50,
   "search_strategy": "hybrid",
   "search_phase": "monitoring",
   "target_companies": [],

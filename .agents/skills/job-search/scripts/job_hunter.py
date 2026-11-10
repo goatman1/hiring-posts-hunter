@@ -9,6 +9,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit, urlunsplit, unquote
 import re
 
@@ -27,6 +28,10 @@ def digest(value):
 def canonical(url):
     parts = urlsplit(url)
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip('/'), '', ''))
+
+def post_identity(post):
+    match = re.search(r'(?:activity|ugcPost|share)[:\-](\d+)', unquote(post['url']))
+    return match.group(1) if match else digest(canonical(post['url']) if post['url'] else canonical(post['author_url']) + ' ' + ' '.join(post['content'].split()))
 
 def similar_content(left, right):
     # Bounded linear-time lexical hint, never evidence that two roles are the same.
@@ -50,6 +55,40 @@ class Post(Strict):
     posted_date: str = ''
     date_precision: str = 'unknown'
     track: str = 'tech'
+
+class FeedItem(Strict):
+    item_key: str = ''
+    disposition: Literal['candidate', 'not_hiring', 'out_of_scope', 'sponsored']
+    reason: str = Field(min_length=1, max_length=1000)
+    post: Post | None = None
+
+    @model_validator(mode='after')
+    def validate_item(self):
+        if self.disposition == 'candidate':
+            if self.post is None:
+                raise ValueError('Candidate feed items require a captured post')
+            identity = post_identity(self.post.model_dump())
+            if self.item_key and self.item_key != identity:
+                raise ValueError('Candidate item_key must match the post identity, or be omitted')
+            self.item_key = identity
+        elif self.post is not None:
+            raise ValueError('Do not store unrelated full post content in the feed audit')
+        else:
+            match = re.search(r'(?:activity|ugcPost|share)[:\-](\d+)', unquote(self.item_key))
+            if match:
+                self.item_key = match.group(1)
+            elif self.item_key.startswith(('https://', 'http://')):
+                self.item_key = digest(canonical(self.item_key))
+        if not self.item_key.strip():
+            raise ValueError('Skipped feed items require a stable post ID or author/content fingerprint')
+        return self
+
+class FeedBatch(Strict):
+    run_id: str
+    batch_id: str = Field(min_length=1)
+    items: list[FeedItem] = Field(max_length=10)
+    loading_actions: int = Field(default=0, ge=0, strict=True)
+    elapsed_seconds: float = Field(default=0, ge=0, allow_inf_nan=False)
 
 class Check(Strict):
     result: str
@@ -162,13 +201,14 @@ class Hunter:
             if any(v not in {'off', 'flag', 'enforce'} for v in config['filters'].values()):
                 raise ValueError('Invalid semantic filter mode')
             plan = dispatch(self, 'search-plan', {'config': config})
-            run = dict(id=uuid.uuid4().hex, config=config, started=now(), posts=[], new_posts=[], inspected=[], loads=0, stalled=0, elapsed_seconds=0, stop_reason=None, progress={}, resumes=load_resumes(config['resume_dir']))
+            run = dict(id=uuid.uuid4().hex, config=config, started=now(), posts=[], new_posts=[], inspected=[], feed_inspected=[], feed_counts={}, loads=0, stalled=0, elapsed_seconds=0, stop_reason=None, progress={}, resumes=load_resumes(config['resume_dir']))
             self.put('run', run['id'], run)
             return {'run_id': run['id'], 'config': config, 'search_plan': plan}
-        if command in {'run-status', 'checkpoint', 'ingest-posts', 'analysis-batch', 'save-assessments'}:
+        if command in {'run-status', 'feed-audit', 'checkpoint', 'ingest-posts', 'ingest-feed', 'analysis-batch', 'save-assessments'}:
             run = self.get('run', data['run_id'])
         if command == 'run-status':
-            return {k: v for k, v in run.items() if k not in {'resumes', 'inspected'}}
+            return {**{k: v for k, v in run.items() if k not in {'resumes', 'inspected', 'feed_inspected'}},
+                    'inspected_count': len(run.get('feed_inspected', [])) if run['config'].get('collection_source') == 'for_you' else len(run['inspected'])}
         if command == 'checkpoint':
             run['elapsed_seconds'] += max(0, float(data.get('elapsed_seconds', 0)))
             run['progress'].update(data.get('progress', {}))
@@ -177,7 +217,18 @@ class Hunter:
             self.stop(run)
             self.put('run', run['id'], run)
             return {'stop_reason': run['stop_reason']}
-        if command == 'ingest-posts':
+        if command == 'feed-audit':
+            limit, offset = data.get('limit', 50), data.get('offset', 0)
+            if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or offset < 0:
+                raise ValueError('feed-audit limit must be 1..100 and offset nonnegative')
+            observations = sorted((o for o in self.all('feed-observation') if o['run_id'] == run['id']), key=lambda o: o['rank'])
+            return {'run_id': run['id'], 'total': len(observations), 'observations': observations[offset:offset + limit]}
+        if command in {'ingest-posts', 'ingest-feed'}:
+            feed = command == 'ingest-feed'
+            if feed != (run['config'].get('collection_source', 'search') == 'for_you'):
+                raise ValueError('Use ingest-feed for for_you runs and ingest-posts for search runs')
+            if feed:
+                data = FeedBatch.model_validate(data).model_dump()
             batch_key = digest(run['id'] + '|' + data['batch_id']) if data.get('batch_id') else None
             request_digest = digest(json.dumps(data, sort_keys=True))
             if batch_key:
@@ -188,14 +239,53 @@ class Hunter:
                     return previous['result']
             if run['stop_reason']:
                 return {'added': [], 'stop_reason': run['stop_reason']}
-            posts = [Post.model_validate(p).model_dump() for p in data['posts']]
+            feed_new = []
+            if feed:
+                posts = []
+                limit = min(run['config']['feed_post_count'], run['config']['max_inspected'])
+                effective_posts = {p['id']: p for p in self.all('post')}
+                aliases = {a['id']: a['post_id'] for a in self.all('post-alias')}
+                for item in data['items']:
+                    if item['item_key'] in aliases:
+                        item['item_key'] = aliases[item['item_key']]
+                    if item['post'] is not None:
+                        candidate = item['post']
+                        fingerprint = digest(canonical(candidate['author_url']) + ' ' + ' '.join(candidate['content'].split()))
+                        exact = [p for p in effective_posts.values() if post_identity(p) == item['item_key']]
+                        matches = [p for p in effective_posts.values() if p.get('fingerprint') == fingerprint and (not p['url'] or not candidate['url'])]
+                        if len(exact) == 1:
+                            item['item_key'] = exact[0]['id']
+                        elif len(matches) == 1:
+                            item['item_key'] = matches[0]['id']
+                        previous = effective_posts.get(item['item_key'], {})
+                        effective_posts[item['item_key']] = dict(candidate, id=item['item_key'], fingerprint=fingerprint)
+                        if not candidate['url'] and previous.get('url'):
+                            effective_posts[item['item_key']]['url'] = previous['url']
+                    if item['item_key'] in run['feed_inspected']:
+                        # A better permalink may arrive after an earlier fallback capture.
+                        if item['post'] is not None:
+                            posts.append(item['post'])
+                        continue
+                    if len(run['feed_inspected']) >= limit:
+                        break
+                    run['feed_inspected'].append(item['item_key'])
+                    feed_new.append(item['item_key'])
+                    disposition = item['disposition']
+                    run['feed_counts'][disposition] = run['feed_counts'].get(disposition, 0) + 1
+                    self.put('feed-observation', digest(run['id'] + '|' + item['item_key']),
+                             dict(run_id=run['id'], item_key=item['item_key'], rank=len(run['feed_inspected']),
+                                  disposition=disposition, reason=item['reason'], captured_at=now()))
+                    if item['post'] is not None:
+                        posts.append(item['post'])
+                run['elapsed_seconds'] += data['elapsed_seconds']
+            else:
+                posts = [Post.model_validate(p).model_dump() for p in data['posts']]
             loading_actions = data.get('loading_actions', 1)
             if type(loading_actions) is not int or loading_actions < 0:
                 raise ValueError('loading_actions must be a nonnegative integer')
             added = []
             for post in posts:
-                match = re.search(r'(?:activity|ugcPost|share)[:\-](\d+)', unquote(post['url']))
-                key = match.group(1) if match else digest(canonical(post['url']) if post['url'] else canonical(post['author_url']) + ' ' + ' '.join(post['content'].split()))
+                key = post_identity(post)
                 fingerprint = digest(canonical(post['author_url']) + ' ' + ' '.join(post['content'].split()))
                 prior_posts = self.all('post')
                 # Promote an exact fallback capture without changing IDs referenced by evidence/history.
@@ -219,6 +309,8 @@ class Hunter:
                 if old and old['content_digest'] != post['content_digest']:
                     self.put('post-version', digest(key + old['content_digest']), old)
                 self.put('post', key, post)
+                self.put('post-sighting', digest(run['id'] + '|' + key),
+                         dict(run_id=run['id'], post_id=key, source=run['config'].get('collection_source', 'search'), captured_at=now()))
                 if key not in run['inspected']:
                     run['inspected'].append(key)
                 if old is None:
@@ -237,13 +329,22 @@ class Hunter:
                     completed = any(a['post_id'] == key and a['content_digest'] == post['content_digest'] for a in self.all('assessment'))
                     if not completed:
                         run['posts'].append(key)
-                if len(run['new_posts']) >= run['config']['target_count'] or len(run['inspected']) >= run['config']['max_inspected']:
+                if not feed and (len(run['new_posts']) >= run['config']['target_count'] or len(run['inspected']) >= run['config']['max_inspected']):
                     break
             run['loads'] += loading_actions
-            run['stalled'] = 0 if added else run['stalled'] + 1
+            if feed:
+                if feed_new:
+                    run['stalled'] = 0
+                elif loading_actions:
+                    run['stalled'] += 1
+            else:
+                run['stalled'] = 0 if added else run['stalled'] + 1
             self.stop(run)
             self.put('run', run['id'], run)
             result = {'added': added, 'stop_reason': run['stop_reason']}
+            if feed:
+                result.update(inspected_count=len(run['feed_inspected']), new_inspected=len(feed_new),
+                              dispositions=run['feed_counts'], new_candidates=len(run['new_posts']))
             if batch_key:
                 self.put('ingestion', batch_key, {'id': batch_key, 'request_digest': request_digest, 'result': result})
             return result
@@ -340,7 +441,10 @@ class Hunter:
 
     def stop(self, run):
         c = run['config']
-        for condition, reason in ((len(run['new_posts']) >= c['target_count'], 'target_reached'), (len(run['inspected']) >= c['max_inspected'], 'inspection_limit'), (run['loads'] >= c['max_loading_actions'], 'loading_limit'), (run['stalled'] >= c['no_progress_limit'], 'no_progress'), (run['elapsed_seconds'] >= c['max_minutes'] * 60, 'time_limit')):
+        feed = c.get('collection_source') == 'for_you'
+        inspected = len(run.get('feed_inspected', [])) if feed else len(run['inspected'])
+        reached = inspected >= c['feed_post_count'] if feed else len(run['new_posts']) >= c['target_count']
+        for condition, reason in ((reached, 'feed_target_reached' if feed else 'target_reached'), (inspected >= c['max_inspected'], 'inspection_limit'), (run['loads'] >= c['max_loading_actions'], 'loading_limit'), (run['stalled'] >= c['no_progress_limit'], 'no_progress'), (run['elapsed_seconds'] >= c['max_minutes'] * 60, 'time_limit')):
             if condition and not run['stop_reason']:
                 run['stop_reason'] = reason
 
