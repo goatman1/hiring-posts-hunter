@@ -1,0 +1,20 @@
+{
+  "target_count": 100,
+  "sort_by": "date_posted",
+  "date_posted": "past_week",
+  "max_inspected": 500,
+  "max_loading_actions": 50,
+  "max_minutes": 30,
+  "no_progress_limit": 3,
+  "shortlist_threshold": 60,
+  "resume_dir": "../resumes",
+  "available_from": null,
+  "future_sponsorship": null,
+  "filters": {"location": "enforce", "title": "enforce", "skills": "flag", "start_date": "flag", "sponsorship": "flag"},
+  "queries": [
+    {"track": "tech", "keywords": "hiring applied scientist machine learning"},
+    {"track": "quant", "keywords": "hiring quantitative researcher developer"},
+    {"track": "tech", "keywords": "my team hiring reinforcement learning robotics AI agents optimization"},
+    {"track": "quant", "keywords": "quant research hiring PhD graduate junior"}
+  ]
+}
